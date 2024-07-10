@@ -11,11 +11,11 @@
 # %% [markdown]
 # 
 # ## Load required libraries
-#   - Firedrake is the main FEM library
-#   - numpy is used to store diagnostics results and to save them to a file
-#   - matplotlib is used for plotting the diagnostics in time
-#   - os and time are use only to generate the output file in the correct place and with the nice names
-# 
+#   - `firedrake`` is the main FEM library
+#   - `numpy`` is used to store diagnostics results and to save them to a file
+#   - `os` and `time` are used only to generate the output file in the correct place and with the nice names
+#   - `matplotlib` is used for plotting the diagnostics in time
+#   - `test_cases` contains the default run parameters for the test cases
  
 # %%
 import firedrake
@@ -25,10 +25,12 @@ import time
 
 from matplotlib import pyplot
 
+from test_cases import *
+
 # %% [markdown]
 #
 # ## Environment setup
-# Generate folder where to save each run (they are saved inside results folder and named by time of run)
+# Generate folder and file where to save each run (they are saved inside results folder and named by time of run)
 #
 
 # %%
@@ -36,34 +38,70 @@ results_path = './results/' + time.strftime('%Y_%m_%d_%H_%M_%S', time.localtime(
 if not os.path.exists(results_path):
     os.makedirs(results_path)
 
+sol_outfile = firedrake.VTKFile(results_path + "shallow_waters.pvd")  # file name where to solve solution for plotting
+
 # %% [markdown]
 # ## Parameters 
+
+# %% [markdown]
+# ## Test run
+# Select the test to run
+#   - Gaussian hill initial condition: `gaussian_hill`
+#   - Travelling wave: `travelling_wave`
+#
+
+# %%
+test_case = "double_vortex"  # options:
+                               #    "gaussian_hill"
+                               #    "travelling_wave"
+                               #    "double_vortex"
+
+test_case_default_parameters = get_test_case_default_parameters[test_case]
+
 
 # %% [markdown]
 # ### Spatial discretization
 #
 
+# %% [markdown]
+# #### Domain and mesh size
+
 # %%
-Lx = 1.0  # domain size in the x-direction
-Ly = 1.0  # domain size in the y-direction
-n_elements = 10  # number of subdivisions in x- and y-directions
-p = 1  # polynomial degree of de Rham complex
+Lx = test_case_default_parameters["Lx"]  # domain size in the x-direction
+Ly = test_case_default_parameters["Ly"]  # domain size in the y-direction
+n_elements_x = test_case_default_parameters["n_elements_x"]  # number of subdivisions in x-direction
+n_elements_y = test_case_default_parameters["n_elements_y"]  # number of subdivisions in y-direction
+
+# %% [markdown]
+# #### Domain and mesh size
+
+# %%
+p = test_case_default_parameters["p"]  # polynomial degree of de Rham complex
+use_quad_complex = True  # options:
+                         #    True: uses a quadrilateral mesh and the FEM bases over quadrilaterals discussed in the course
+                         #    False: uses a triangular mesh and the Raviart-Thomas bases
 
 # %% [markdown]
 # ### Temporal discretization
 # You can seet the time integrator to use, the time step, and the number of time steps.
+#    - `midpoint`: uses the midpoint rule (lowest order Gauss-Lobatto time integrator) that is symplectic but since
+#                  the Hamiltonian for the shallow waters is not quadratic (it is cubic) it does not exactly conserve
+#                  energy
+#    - `poisson`: uses the Poisson integrator, which is exactly energy conserving.
 
 # %%
-time_integrator = "midpoint"  # you can choose either "midpoint" or "poisson" 
-dt = 0.01  # time step size
-n_t_steps = 20  # number of time steps to compute
+time_integrator = "poisson"   # options:
+                              #    "midpoint"
+                              #    "poisson" 
+dt = test_case_default_parameters["dt"]  # time step size
+n_t_steps = test_case_default_parameters["n_t_steps"]  # number of time steps to compute
 
 # %% [markdown]
 # ### Nonlinear solver parameters
 #
 
 # %%
-newton_tol = 1e-10  # tolerance to reach to finish Newton-Raphson nonlinear solve step
+newton_tol = 1e-12  # tolerance to reach to finish Newton-Raphson nonlinear solve step
 newton_max_iter = 20  # maximum number of iterations to perform per Newton-Raphson solve step
 
 # %% [markdown]
@@ -81,12 +119,6 @@ MUMPS = {
         "pc_factor_mat_solver_type": "mumps"
         }
 
-# %% [markdown]
-# ### Internal auxiliary definitions
-#
-
-# %%
-g = 10.0  # gravitational acceleration
 
 # %% [markdown]
 # ## Initial conditions
@@ -97,22 +129,14 @@ g = 10.0  # gravitational acceleration
 #
 
 # %%
-def h_0_lambda(x, y):
-    sigma = 0.05
-    amplitude = 0.01
-    return firedrake.Constant(1.0) + amplitude*firedrake.exp(-0.5*((x - 0.5*Lx)**2)/sigma**2)*(1.0/(sigma*firedrake.sqrt(2.0*numpy.pi))) * firedrake.exp(-0.5*((y - 0.5*Ly)**2)/sigma**2)*(1.0/(sigma*firedrake.sqrt(2.0*numpy.pi)))
+h_0_lambda = test_case_default_parameters["h_0_lambda"]
 
 # %% [markdown]
 # ### Initial conditions for fluid velocity: u(t = 0)
 #
 
 # %%
-def u_0_lambda(x, y):
-    return firedrake.as_vector([firedrake.Constant(0.0), firedrake.Constant(0.0)])
-
-
-
-sol_outfile = firedrake.VTKFile(results_path + "shallow_waters.pvd")  # file name where to solve solution for plotting
+u_0_lambda = test_case_default_parameters["u_0_lambda"]
 
 # %% [markdown]
 # ## Auxiliary functions extending Firedrake's functionality
@@ -154,15 +178,34 @@ def cross_scalar(w, v):
     return firedrake.as_vector([-w*v[1], w*v[0]])
 
 # %% [markdown]
+# ## Auxiliary functions used in the computations
+# For example, computation of potential vorticity.
+
+# %%
+def compute_vorticity(q_space, u, h, q):
+    q_trial = firedrake.TrialFunction(q_space)
+    q_test = firedrake.TestFunction(q_space)
+
+    a = firedrake.inner(h*q_trial, q_test)*firedrake.dx
+    L = firedrake.inner(u, rot(q_test))*firedrake.dx
+
+    A = firedrake.assemble(a)
+    b = firedrake.assemble(L)
+
+    firedrake.solve(A, q.vector(), b, solver_parameters=MUMPS)
+
+    return q
+
+# %% [markdown]
 # ## Construct the mesh
-# Constructs a periodic quadrilateral mesh with `n_elements` $\times$ `n_elements` over a rectangular 
+# Constructs a periodic quadrilateral os triangular mesh with `n_elements_x` $\times$ `n_elements_y` over a rectangular 
 # domain of dimensions `Lx` $\times$ `Ly`.
 # 
-# You can make a triangular mesh by setting `quadrilateral=False`. If you do this, you need to change the 
-# function space `D` below (see instructions there).
+# You can choose a quadrilateral or triangular mesh by setting `use_quad_complex=True`, respectively. This choice will also
+# affect the basis functions used to define the discrete complex, see below.
 
 # %% 
-mesh = firedrake.PeriodicRectangleMesh(n_elements, n_elements, Lx, Ly, quadrilateral=True) 
+mesh = firedrake.PeriodicRectangleMesh(n_elements_x, n_elements_y, Lx, Ly, quadrilateral=use_quad_complex) 
 x, y = firedrake.SpatialCoordinate(mesh)  # these are the coordinate variables of the mesh, necessary to use in expressions
 n_vector = firedrake.FacetNormal(mesh)  # the normal vectors at the mesh cell interfaces (not used in this case)
 
@@ -194,16 +237,32 @@ n_vector = firedrake.FacetNormal(mesh)  # the normal vectors at the mesh cell in
 # (p, p) \stackrel{\nabla\times}{\longrightarrow} (p, p-1) \times (p-1, p) \stackrel{\nabla\cdot}{\longrightarrow} (p-1, p-1)
 # $$
 #
-# __NOTE__: If you chose triangular mesh above, by setting `quadrilateral=True`, then you need to change the `D` space
-# to be spanned by the Raviart-Thomas elements by using the line
+# __NOTE__: If you chose to use a triangular mesh above, by setting `use_quad_complex=False`, then you need to have the `D` space
+# spanned by the Raviart-Thomas elements and the `S` space to be spanned by the DG elements, by replacing the lines
+# ```python
+# D = firedrake.FunctionSpace(mesh, "RTCF", p)
+# S = firedrake.FunctionSpace(mesh, "DQ L2", p-1)
+# ```
+# with
 # ```python
 # D = firedrake.FunctionSpace(mesh, "RT", p)
+# S = firedrake.FunctionSpace(mesh, "DG", p-1)
 # ```
+#
+# This is automatically done by setting the flag `use_quad_complex` to either `True` (quadrilateral mesh, with mimetic bases) or 
+# `False` (triangular mesh, with RT basis).
 
 # %%
-G = firedrake.FunctionSpace(mesh, "CG", p)  # standard continuous Galerkin elements (nodal interpolants) of degree (p,p), G \subset H^{1}
-D = firedrake.FunctionSpace(mesh, "RTCF", p)  # mimetic flux edge basis functions (in 2D) of degree (p, p-1) x (p-1, p), D \subset H(div)
-S = firedrake.FunctionSpace(mesh, "DQ L2", p - 1)  # standard discontinuous Galerkin elements of degree (p-1, p-1), S \subset L^{2}
+if use_quad_complex:
+    G = firedrake.FunctionSpace(mesh, "CG", p)  # standard continuous Galerkin elements (nodal interpolants) of degree (p,p), G \subset H^{1}
+    D = firedrake.FunctionSpace(mesh, "RTCF", p)  # mimetic flux edge basis functions (in 2D) of degree (p, p-1) x (p-1, p), D \subset H(div)
+    S = firedrake.FunctionSpace(mesh, "DQ L2", p - 1)  # standard discontinuous Galerkin elements of degree (p-1, p-1), S \subset L^{2}
+
+else:
+    G = firedrake.FunctionSpace(mesh, "CG", p)  # standard continuous Galerkin elements (nodal interpolants) of degree (p,p), G \subset H^{1}
+    D = firedrake.FunctionSpace(mesh, "RT", p)  # Raviart-Thomas flux edge basis functions (in 2D) of degree (p, p-1) x (p-1, p), D \subset H(div)
+    S = firedrake.FunctionSpace(mesh, "DG", p - 1)  # standard discontinuous Galerkin elements of degree (p-1, p-1), S \subset L^{2}
+
 
 # %% [markdown]
 # ### Setup solution fields 
@@ -228,6 +287,7 @@ h_1 = firedrake.Function(S)  # next time step
 # Potential vorticity field
 q_0 = firedrake.Function(G)  # current time step
 q_1 = firedrake.Function(G)  # next time step
+q_1_temp = firedrake.Function(G)  # next time step directly computed from u_1
 
 # Mass flux
 F_0 = firedrake.Function(D)  # current time step
@@ -279,7 +339,7 @@ def advance_mid_point_newton(u_0, u_1, h_0, h_1, q_0, q_1, K_0, K_1, F_0, F_1, G
     newton_error = 1.0
 
     # Print columns labels of Newton-Raphson output information
-    print("                           u         |           h         |           q         |           K         |            F")
+    print("                           u         |           h         |           q         |           K         |           F         |       Total ")
         
     while (newton_error > newton_tol) and (newton_iter < newton_max_iter):
         # Setup Newton method
@@ -290,7 +350,7 @@ def advance_mid_point_newton(u_0, u_1, h_0, h_1, q_0, q_1, K_0, K_1, F_0, F_1, G
             dt*firedrake.inner(K_1, firedrake.div(mixed_u_test))*firedrake.dx - \
             0.5*g*dt*firedrake.inner(h_0 + h_1, firedrake.div(mixed_u_test))*firedrake.dx + \
             firedrake.inner(h_1 - h_0, mixed_h_test)*firedrake.dx + \
-            0.5*dt*firedrake.inner(firedrake.div(F_1), mixed_h_test)*firedrake.dx + \
+            dt*firedrake.inner(firedrake.div(F_1), mixed_h_test)*firedrake.dx + \
             firedrake.inner(0.5*(h_1+ h_0)*q_1, mixed_q_test)*firedrake.dx - \
             firedrake.inner(0.5*(u_1 + u_0), rot(mixed_q_test))*firedrake.dx + \
             firedrake.inner(K_1, mixed_K_test)*firedrake.dx - \
@@ -305,7 +365,7 @@ def advance_mid_point_newton(u_0, u_1, h_0, h_1, q_0, q_1, K_0, K_1, F_0, F_1, G
             0.5*dt*firedrake.inner(mixed_K_trial, firedrake.div(mixed_u_test))*firedrake.dx - \
             0.5*g*dt*firedrake.inner(mixed_h_trial, firedrake.div(mixed_u_test))*firedrake.dx + \
             firedrake.inner(mixed_h_trial, mixed_h_test)*firedrake.dx + \
-            0.5*dt*firedrake.inner(firedrake.div(mixed_F_trial), mixed_h_test)*firedrake.dx + \
+            dt*firedrake.inner(firedrake.div(mixed_F_trial), mixed_h_test)*firedrake.dx + \
             0.5*firedrake.inner(mixed_h_trial*q_1, mixed_q_test)*firedrake.dx + \
             0.5*firedrake.inner((h_1 + h_0)*mixed_q_trial, mixed_q_test)*firedrake.dx - \
             0.5*firedrake.inner(mixed_u_trial, rot(mixed_q_test))*firedrake.dx + \
@@ -322,17 +382,42 @@ def advance_mid_point_newton(u_0, u_1, h_0, h_1, q_0, q_1, K_0, K_1, F_0, F_1, G
         firedrake.solve(A, dsol.vector(), b, solver_parameters=MUMPS)
 
         # Compute Newton error 
-        newton_error_u = firedrake.norm(du)
-        newton_error_h = firedrake.norm(dh)
-        newton_error_q = firedrake.norm(dq)
-        newton_error_K = firedrake.norm(dK)
-        newton_error_F = firedrake.norm(dF)
-        newton_error = newton_error_u + newton_error_h + newton_error_q + newton_error_K + newton_error_F
+        norm_u = firedrake.norm(u_1)
+        if norm_u < 1.0:
+            newton_error_u = firedrake.norm(du)
+        else:
+            newton_error_u = firedrake.norm(du) / norm_u
+
+        norm_h = firedrake.norm(h_1)   
+        if norm_h < 1.0:
+            newton_error_h = firedrake.norm(dh)
+        else:
+            newton_error_h = firedrake.norm(dh)/norm_h
+        
+        norm_q = firedrake.norm(q_1)   
+        if norm_q < 1.0:
+            newton_error_q = firedrake.norm(dq)
+        else:
+            newton_error_q = firedrake.norm(dq)/norm_q
+        
+        norm_K = firedrake.norm(K_1)   
+        if norm_K < 1.0:
+            newton_error_K = firedrake.norm(dK)
+        else:
+            newton_error_K = firedrake.norm(dK)/norm_K
+
+        norm_F = firedrake.norm(F_1)   
+        if norm_F < 1.0:
+            newton_error_F = firedrake.norm(dF)
+        else:
+            newton_error_F = firedrake.norm(dF)/norm_F
+
+        newton_error = (newton_error_u + newton_error_h + newton_error_q + newton_error_K + newton_error_F)/5.0
 
         print("   Newton error: {newton_error_u:19.16f} | {newton_error_h:19.16f} | {newton_error_q:19.16f} | "\
-                "{newton_error_K:19.16f} | {newton_error_F:19.16f}".format(newton_error_u=newton_error_u, \
+                "{newton_error_K:19.16f} | {newton_error_F:19.16f} | {newton_error:19.16f}".format(newton_error_u=newton_error_u, \
                 newton_error_h=newton_error_h, newton_error_q=newton_error_q, newton_error_K=newton_error_K, \
-                newton_error_F=newton_error_F))
+                newton_error_F=newton_error_F, newton_error=newton_error))
         
         # Update solution
         u_temp.vector()[:] = u_1.vector()[:] - du.vector()[:]
@@ -373,7 +458,7 @@ def advance_poisson_newton(u_0, u_1, h_0, h_1, q_0, q_1, K_0, K_1, F_0, F_1, G, 
     newton_error = 1.0
 
     # Print columns labels of Newton-Raphson output information
-    print("                           u         |           h         |           q         |           K         |            F")
+    print("                           u         |           h         |           q         |           K         |           F         |       Total ")
         
     while (newton_error > newton_tol) and (newton_iter < newton_max_iter):
 
@@ -425,17 +510,42 @@ def advance_poisson_newton(u_0, u_1, h_0, h_1, q_0, q_1, K_0, K_1, F_0, F_1, G, 
         firedrake.solve(A, dsol.vector(), b, solver_parameters=MUMPS)
 
         # Compute Newton error 
-        newton_error_u = firedrake.norm(du)
-        newton_error_h = firedrake.norm(dh)
-        newton_error_q = firedrake.norm(dq)
-        newton_error_K = firedrake.norm(dK)
-        newton_error_F = firedrake.norm(dF)
-        newton_error = newton_error_u + newton_error_h + newton_error_q + newton_error_K + newton_error_F
+        norm_u = firedrake.norm(u_1)
+        if norm_u < 1.0:
+            newton_error_u = firedrake.norm(du)
+        else:
+            newton_error_u = firedrake.norm(du) / norm_u
+
+        norm_h = firedrake.norm(h_1)   
+        if norm_h < 1.0:
+            newton_error_h = firedrake.norm(dh)
+        else:
+            newton_error_h = firedrake.norm(dh)/norm_h
+        
+        norm_q = firedrake.norm(q_1)   
+        if norm_q < 1.0:
+            newton_error_q = firedrake.norm(dq)
+        else:
+            newton_error_q = firedrake.norm(dq)/norm_q
+        
+        norm_K = firedrake.norm(K_1)   
+        if norm_K < 1.0:
+            newton_error_K = firedrake.norm(dK)
+        else:
+            newton_error_K = firedrake.norm(dK)/norm_K
+
+        norm_F = firedrake.norm(F_1)   
+        if norm_F < 1.0:
+            newton_error_F = firedrake.norm(dF)
+        else:
+            newton_error_F = firedrake.norm(dF)/norm_F
+
+        newton_error = (newton_error_u + newton_error_h + newton_error_q + newton_error_K + newton_error_F)/5.0
 
         print("   Newton error: {newton_error_u:19.16f} | {newton_error_h:19.16f} | {newton_error_q:19.16f} | "\
-                "{newton_error_K:19.16f} | {newton_error_F:19.16f}".format(newton_error_u=newton_error_u, \
+                "{newton_error_K:19.16f} | {newton_error_F:19.16f} | {newton_error:19.16f}".format(newton_error_u=newton_error_u, \
                 newton_error_h=newton_error_h, newton_error_q=newton_error_q, newton_error_K=newton_error_K, \
-                newton_error_F=newton_error_F))
+                newton_error_F=newton_error_F, newton_error=newton_error))
         
         # Update solution
         u_temp.vector()[:] = u_1.vector()[:] - du.vector()[:]
@@ -466,7 +576,7 @@ u_1.assign(u_0)
 h_1.assign(h_0)
 
 # %% [markdown]
-# ### Allocate memory for simulation diagnostics
+# ### Allocate memory for simulation diagnostics and initialize them
 # During time evolution we will compute the kinetic energy $K$, potential energy $P$, total energy $E$,
 # enstrophy $E$, and total volume $V$.
 #
@@ -477,6 +587,19 @@ energy_P = numpy.zeros(n_t_steps)
 energy = numpy.zeros(n_t_steps)
 enstrophy = numpy.zeros(n_t_steps)
 volume = numpy.zeros(n_t_steps)
+
+# Compute simulation diagnostics
+# Energy
+energy_K[0] = 0.5*firedrake.assemble(firedrake.inner(u_1, u_1*h_1)*firedrake.dx)
+energy_P[0] = 0.5*firedrake.assemble(firedrake.inner(h_1, g*h_1)*firedrake.dx)
+energy[0] = energy_K[0] + energy_P[0]
+
+# Potential enstrophy
+compute_vorticity(G, u_1, h_1, q_1_temp)
+enstrophy[0] = 0.5*firedrake.assemble(firedrake.inner(h_1*q_1_temp, q_1_temp)*firedrake.dx)
+
+# Volume
+volume[0] = firedrake.assemble(h_1*firedrake.dx)
 
 # %% [markdown]
 # ### Export the initial condition to paraview 
@@ -502,7 +625,7 @@ sol_outfile.write(u_1, h_1, q_1, K_1, F_1, time = 0.0)
 # see above.
 
 # %%
-for time_step in range(0, n_t_steps):
+for time_step in range(1, n_t_steps):
     print("\nT step: " + str(time_step))
 
     # Reinitialize initial conditions
@@ -525,12 +648,13 @@ for time_step in range(0, n_t_steps):
 
     # Compute simulation diagnostics
     # Energy
-    energy_K[time_step] = 0.25*firedrake.assemble(firedrake.inner(u_1 + u_0, F_1)*firedrake.dx)
-    energy_P[time_step] = 0.25*firedrake.assemble(firedrake.inner(h_1+h_0, 0.5*g*(h_1+h_0))*firedrake.dx)
+    energy_K[time_step] = 0.5*firedrake.assemble(firedrake.inner(u_1, u_1 * h_1)*firedrake.dx)
+    energy_P[time_step] = 0.5*firedrake.assemble(firedrake.inner(h_1, g*h_1)*firedrake.dx)
     energy[time_step] = energy_K[time_step] + energy_P[time_step]
     
     # Potential enstrophy
-    enstrophy[time_step] = 0.5*firedrake.assemble(firedrake.inner(h_1*q_1, q_1)*firedrake.dx)
+    compute_vorticity(G, u_1, h_1, q_1_temp)
+    enstrophy[time_step] = 0.5*firedrake.assemble(firedrake.inner(h_1*q_1_temp, q_1_temp)*firedrake.dx)
     
     # Volume
     volume[time_step] = firedrake.assemble(h_1*firedrake.dx)
@@ -548,7 +672,7 @@ for time_step in range(0, n_t_steps):
     print("   [t] - [0]   : {denergy:19.16f} | {denergy_K:19.16f} | {denergy_P:19.16f} | "\
                 "{denstrophy:19.16f} | {dvolume:19.16f}".format(denergy=energy[time_step]-energy[0], \
                 denergy_K=energy_K[time_step]-energy_K[0], denergy_P=energy_P[time_step]-energy_P[0], \
-                denstrophy=enstrophy[time_step]-enstrophy[0], dvolume=volume[time_step]-volume[0]))
+                denstrophy=enstrophy[time_step]-enstrophy[1], dvolume=volume[time_step]-volume[0]))
     
     # Save diagnostics to file each time step (to be safe)
     diagnostics_filename = results_path + "diagnostics.npz"
@@ -580,7 +704,7 @@ pyplot.savefig(energy_plot_filename, format='pdf', dpi=200)
 
 #  Potential enstrophy
 pyplot.figure()
-pyplot.plot(numpy.arange(0, n_t_steps)*dt, enstrophy)
+pyplot.plot(numpy.arange(1, n_t_steps)*dt, enstrophy[1:])
 pyplot.title("Potential Enstrophy")
 pyplot.xlabel("t (s)")
 energy_plot_filename = results_path + "enstrophy.pdf"
