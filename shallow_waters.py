@@ -587,6 +587,7 @@ energy_P = numpy.zeros(n_t_steps)
 energy = numpy.zeros(n_t_steps)
 enstrophy = numpy.zeros(n_t_steps)
 volume = numpy.zeros(n_t_steps)
+potential_vorticity = numpy.zeros(n_t_steps)
 
 # Compute simulation diagnostics
 # Energy
@@ -600,6 +601,9 @@ enstrophy[0] = 0.5*firedrake.assemble(firedrake.inner(h_1*q_1_temp, q_1_temp)*fi
 
 # Volume
 volume[0] = firedrake.assemble(h_1*firedrake.dx)
+
+# Potential vorticity
+potential_vorticity[0] = firedrake.assemble(firedrake.inner(h_1, q_1_temp)*firedrake.dx)
 
 # %% [markdown]
 # ### Export the initial condition to paraview 
@@ -659,20 +663,25 @@ for time_step in range(1, n_t_steps):
     # Volume
     volume[time_step] = firedrake.assemble(h_1*firedrake.dx)
 
+    # Potential vorticity
+    potential_vorticity[time_step] = firedrake.assemble(firedrake.inner(h_1, q_1_temp)*firedrake.dx)
+
     # Print diagnostics
-    print("\n                          K+P        |           K         |           P         |           E         |            V")
+    print("\n                          K+P        |           K         |           P         |           E         |           V         |            PV")
     print("   Diagnostics : {energy:19.16f} | {energy_K:19.16f} | {energy_P:19.16f} | "\
-                "{enstrophy:19.16f} | {volume:19.16f}".format(energy=energy[time_step], \
+                "{enstrophy:19.16f} | {volume:19.16f} | {potential_vorticity:19.16f}".format(energy=energy[time_step], \
                 energy_K=energy_K[time_step], energy_P=energy_P[time_step], enstrophy=enstrophy[time_step], \
-                volume=volume[time_step]))
+                volume=volume[time_step], potential_vorticity=potential_vorticity[time_step]))
     print("   [t] - [t-dt]: {denergy:19.16f} | {denergy_K:19.16f} | {denergy_P:19.16f} | "\
-                "{denstrophy:19.16f} | {dvolume:19.16f}".format(denergy=energy[time_step]-energy[time_step-1], \
+                "{denstrophy:19.16f} | {dvolume:19.16f} | {dpotential_vorticity:19.16f}".format(denergy=energy[time_step]-energy[time_step-1], \
                 denergy_K=energy_K[time_step]-energy_K[time_step-1], denergy_P=energy_P[time_step]-energy_P[time_step-1], \
-                denstrophy=enstrophy[time_step]-enstrophy[time_step-1], dvolume=volume[time_step]-volume[time_step-1]))
+                denstrophy=enstrophy[time_step]-enstrophy[time_step-1], dvolume=volume[time_step]-volume[time_step-1], \
+                dpotential_vorticity=potential_vorticity[time_step]-potential_vorticity[time_step-1]))
     print("   [t] - [0]   : {denergy:19.16f} | {denergy_K:19.16f} | {denergy_P:19.16f} | "\
-                "{denstrophy:19.16f} | {dvolume:19.16f}".format(denergy=energy[time_step]-energy[0], \
+                "{denstrophy:19.16f} | {dvolume:19.16f} | {dpotential_vorticity:19.16f}".format(denergy=energy[time_step]-energy[0], \
                 denergy_K=energy_K[time_step]-energy_K[0], denergy_P=energy_P[time_step]-energy_P[0], \
-                denstrophy=enstrophy[time_step]-enstrophy[1], dvolume=volume[time_step]-volume[0]))
+                denstrophy=enstrophy[time_step]-enstrophy[1], dvolume=volume[time_step]-volume[0], \
+                dpotential_vorticity=potential_vorticity[time_step]-potential_vorticity[0]))
     
     # Save diagnostics to file each time step (to be safe)
     diagnostics_filename = results_path + "diagnostics.npz"
